@@ -1,7 +1,12 @@
 # UTS Computer Vision 🔎
+Kelompok 14
+187221097	Oksaviyana Alfarezi
+187231077	Raditya Nauval Ramadhan Putra Wibowo
+187231088	Dimas Akbar Hataputra
+187231075	Dzaky Muttaqi Sunaryadi
+187231093	Amir Gymnastiar
 
 Pipeline pengolahan citra pada dataset motif batik:
-
 - **A:** input -> grayscale -> enhancement (Histogram Equalization, Contrast Stretching, CLAHE) -> filter (median / gaussian) -> evaluasi MSE & PSNR
 - **B:** ekstraksi fitur dengan 2 metode, **LBP multi-skala** dan **SIFT (Bag of Visual Words)**, dibandingkan lewat akurasi SVM (data latih/uji 80/20, parameter SVM di-tuning dengan 5-fold CV pada data latih)
 
