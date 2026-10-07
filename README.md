@@ -8,7 +8,7 @@ Pipeline pengolahan citra pada dataset motif batik:
 ## Menjalankan
 
 ```bash
-pip install -r requirements.txt
+pip install opencv-python scikit-image scikit-learn matplotlib
 python uts.py
 ```
 
