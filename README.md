@@ -1,4 +1,4 @@
-# UTS Computer Vision
+# UTS Computer Vision 🔎
 
 Pipeline pengolahan citra pada dataset motif batik:
 
@@ -12,6 +12,6 @@ pip install -r requirements.txt
 python uts.py
 ```
 
-Dataset tidak disertakan di repo. Unduh "Indonesian Batik Motifs" dari Kaggle dan ekstrak ke folder `dataset/` (satu subfolder per kelas). Hasil (gambar, `mse_psnr.csv`, `fitur.npz`) tersimpan di `output/`.
+Dataset tidak disertakan di repo. Unduh "Indonesian Batik Motifs" dari Kaggle https://www.kaggle.com/datasets/dionisiusdh/indonesian-batik-motifs dan ekstrak ke folder `dataset/` (satu subfolder per kelas). Hasil (gambar, `mse_psnr.csv`, `fitur.npz`) tersimpan di `output/`.
 
 Filter dan parameter lain diatur lewat konstanta di bagian atas `uts.py`.
