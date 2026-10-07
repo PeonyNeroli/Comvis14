@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# UTS: data and generated results are not tracked
+dataset/
+output/
