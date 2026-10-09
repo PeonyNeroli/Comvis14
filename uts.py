@@ -14,7 +14,8 @@ import matplotlib.pyplot as plt
 from joblib import Parallel, delayed
 from skimage.feature import local_binary_pattern
 from sklearn.cluster import MiniBatchKMeans
-from sklearn.model_selection import GridSearchCV, train_test_split
+from sklearn.metrics import confusion_matrix, f1_score
+from sklearn.model_selection import GridSearchCV, cross_val_predict, train_test_split
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
@@ -28,6 +29,7 @@ KSIZE = 3             # ukuran kernel filter (ganjil)
 LBP_SCALES = ((8, 1), (16, 2), (24, 3), (24, 5))   # (jumlah tetangga, radius) tiap skala LBP
 SIFT_STEP, SIFT_SIZES = 8, (8, 16)   # jarak grid dan ukuran keypoint dense SIFT
 VOCAB = 256           # jumlah visual word (cluster k-means)
+KMEANS_SAMPLE = 300   # deskriptor acak per citra latih untuk membangun kamus
 TEST_SIZE = 0.2       # porsi data uji
 SVM_GRID = [          # kandidat parameter SVM, dipilih lewat 5-fold CV pada data latih
     {"svc__kernel": ["rbf"], "svc__C": [0.1, 1, 10, 100, 1000], "svc__gamma": ["scale", 1e-4, 1e-3, 1e-2, 1e-1]},
@@ -81,7 +83,7 @@ def bovw_feats(imgs, train_idx):
     """Histogram visual word per citra. Kamus (k-means) dibangun hanya dari citra latih."""
     desc = Parallel(n_jobs=-1)(delayed(sift_desc)(im) for im in imgs)
     rng = np.random.default_rng(0)
-    sample = np.vstack([desc[i][rng.choice(len(desc[i]), 300, replace=False)] for i in train_idx])
+    sample = np.vstack([desc[i][rng.choice(len(desc[i]), KMEANS_SAMPLE, replace=False)] for i in train_idx])
     km = MiniBatchKMeans(VOCAB, random_state=0, n_init=3, batch_size=4096).fit(sample)
     h = np.array([np.bincount(km.predict(d), minlength=VOCAB) for d in desc], dtype=np.float64)
     return np.sqrt(h / h.sum(1, keepdims=True))
@@ -151,6 +153,23 @@ def main():
         r = [x for x in rows if x[2] == m]
         print(f"{m:<22}{np.mean([x[3] for x in r]):>15.2f}{np.mean([x[4] for x in r]):>22.2f}")
 
+    # sebaran PSNR per metode + jumlah citra yang PSNR-nya tertinggi pada metode itu
+    n = len(ENHANCE)
+    winners = [max(rows[i:i + n], key=lambda x: x[4])[2] for i in range(0, len(rows), n)]
+    print(f"\n{'Metode':<22}{'Std PSNR':>10}{'PSNR min':>10}{'PSNR maks':>11}{'Citra PSNR tertinggi':>22}")
+    for m in ENHANCE:
+        ps = [x[4] for x in rows if x[2] == m]
+        print(f"{m:<22}{np.std(ps):>10.2f}{min(ps):>10.2f}{max(ps):>11.2f}{winners.count(m):>22}")
+
+    print("\nRata-rata per kelas (MSE / PSNR dB)")
+    print(f"{'Kelas':<20}" + "".join(f"{m:>24}" for m in ENHANCE))
+    for c in first:
+        cells = []
+        for m in ENHANCE:
+            r = [x for x in rows if x[0] == c and x[2] == m]
+            cells.append(f"{np.mean([x[3] for x in r]):.2f} / {np.mean([x[4] for x in r]):.2f}")
+        print(f"{c:<20}" + "".join(f"{v:>24}" for v in cells))
+
     # B: ekstraksi fitur, lalu bandingkan kedua metode lewat akurasi SVM.
     # Data dibagi latih/uji; kamus SIFT dan parameter SVM hanya memakai data latih, akurasi akhir dari data uji.
     labels = np.array(labels)
@@ -165,11 +184,31 @@ def main():
         save_fig_b(name, i, imgs, feats)
 
     print(f"\n{len(tr)} citra latih, {len(te)} citra uji")
-    print(f"\n{'Metode':<22}{'Fitur':<7}{'Dimensi':>9}{'Akurasi CV':>12}{'Akurasi Uji':>13}  Parameter SVM terbaik")
+    print(f"SIFT: {len(sift_desc(imgs[next(iter(ENHANCE))][0]))} deskriptor per citra, "
+          f"{KMEANS_SAMPLE * len(tr)} sampel deskriptor untuk k-means")
+    print(f"\n{'Metode':<22}{'Fitur':<7}{'Dimensi':>9}{'Akurasi CV':>12}{'Akurasi Uji':>13}{'Macro F1 Uji':>14}  Parameter SVM terbaik")
+    classes, per_class = list(first), []
     for (m, f), X in feats.items():
         g = GridSearchCV(make_pipeline(StandardScaler(), SVC()), SVM_GRID, cv=5, n_jobs=-1).fit(X[tr], labels[tr])
         best = ", ".join(f"{k[5:]}={val}" for k, val in g.best_params_.items())
-        print(f"{m:<22}{f:<7}{X.shape[1]:>9}{g.best_score_:>12.3f}{g.score(X[te], labels[te]):>13.3f}  {best}")
+        pred = g.predict(X[te])
+        print(f"{m:<22}{f:<7}{X.shape[1]:>9}{g.best_score_:>12.3f}{(pred == labels[te]).mean():>13.3f}"
+              f"{f1_score(labels[te], pred, average='macro'):>14.3f}  {best}")
+        # prediksi 5-fold CV pada data latih dengan parameter terbaik, untuk rincian per kelas
+        cv_pred = cross_val_predict(g.best_estimator_, X[tr], labels[tr], cv=5)
+        per_class.append((f"{m} + {f}", confusion_matrix(labels[tr], cv_pred, labels=classes)))
+
+    print("\nRecall per kelas (5-fold CV pada data latih)")
+    print(f"{'Kombinasi':<28}" + "".join(f"{c:>19}" for c in classes))
+    for name, cm in per_class:
+        print(f"{name:<28}" + "".join(f"{v:>19.2f}" for v in cm.diagonal() / cm.sum(1)))
+
+    print("\nConfusion matrix (5-fold CV pada data latih; baris = kelas asli, kolom = prediksi)")
+    for name, cm in per_class:
+        print(f"\n{name}")
+        print(f"{'':<20}" + "".join(f"{c[6:]:>13}" for c in classes))
+        for c, row in zip(classes, cm):
+            print(f"{c:<20}" + "".join(f"{v:>13}" for v in row))
     print(f"\nGambar, mse_psnr.csv, dan fitur.npz tersimpan di {OUT}/")
 
 
