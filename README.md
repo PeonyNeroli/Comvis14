@@ -1,6 +1,6 @@
 # UTS Computer Vision 🔎
 
-Pengolahan citra motif batik Indonesia: grayscale, enhancement, evaluasi MSE dan PSNR, lalu ekstraksi fitur dengan LBP multi-skala, SIFT (Bag of Visual Words), dan MobileNetV2.
+Pengolahan citra motif batik Indonesia: grayscale dan enhancement dievaluasi dengan MSE dan PSNR, lalu fitur SIFT dan LBP dari enhancement terbaik diklasifikasi dengan CNN dan MobileNetV2.
 
 ## Kelompok 14
 
@@ -14,7 +14,7 @@ Pengolahan citra motif batik Indonesia: grayscale, enhancement, evaluasi MSE dan
 
 ## Alur program
 
-**Bagian A: pengolahan citra dan evaluasi**
+**A. Enhancement dan evaluasi**
 
 1. **Input:** citra dibaca per folder kelas, lalu di-resize ke 256×256 piksel.
 2. **Grayscale:** citra warna diubah menjadi satu kanal keabuan. Citra ini menjadi acuan evaluasi.
@@ -22,18 +22,29 @@ Pengolahan citra motif batik Indonesia: grayscale, enhancement, evaluasi MSE dan
    - Histogram Equalization (HE)
    - Contrast Stretching (persentil 2 dan 98 dipetakan ke 0 dan 255)
    - CLAHE (`clipLimit` 2.0, blok 8×8)
-4. **Filter:** median atau Gaussian 3×3 tersedia, tetapi **tidak dipakai** pada hasil akhir (`FILTER = None`). Kedua filter sudah dicoba dan sama-sama menaikkan MSE terhadap citra grayscale.
+4. **Tanpa filter:** median dan Gaussian 3×3 masih tersedia di program, tetapi tidak dipakai (`FILTER = None`), karena keduanya membuat citra lebih buruk (MSE naik).
 5. **Evaluasi:** MSE dan PSNR dihitung per citra antara grayscale dan hasil enhancement, lalu dirata-ratakan per metode dan per kelas.
+6. **Pemilihan:** enhancement dengan MSE rata-rata terendah dipakai untuk tahap berikutnya. Hasilnya **CLAHE**.
 
-**Bagian B: ekstraksi fitur** (dari tiap hasil enhancement)
+**B. Ekstraksi fitur** (dari citra CLAHE)
 
-| Metode | Jumlah fitur | Yang ditangkap |
+Kedua fitur dibentuk sebagai peta 3 kanal berukuran 128×128 agar bisa masuk ke CNN dan MobileNetV2.
+
+| Metode | Cara membentuk peta fitur |
+| --- | --- |
+| Metode 1: SIFT | Deskriptor dense SIFT (RootSIFT, 128 angka) di grid 32×32 titik, diringkas ke 3 komponen PCA. PCA dibangun dari citra latih saja. |
+| Metode 2: LBP | Peta LBP uniform dari 3 skala (P, R) = (8, 1), (16, 2), (24, 3), satu skala per kanal. |
+
+**C. Klasifikasi** (4 output)
+
+| Output | Fitur | Model |
 | --- | --- | --- |
-| LBP multi-skala | 80 | Tekstur lokal, gabungan histogram pola uniform dari 4 skala (P, R) = (8, 1), (16, 2), (24, 3), (24, 5) |
-| SIFT + Bag of Visual Words | 256 | Bentuk lokal, dense SIFT tiap 8 piksel, kamus 256 visual word dari k-means |
-| MobileNetV2 | 1280 | Pola hasil belajar dari ImageNet (bobot pretrained, lapisan klasifikasi dibuang, tanpa pelatihan ulang) |
+| 1 | SIFT | CNN kecil, dilatih dari nol |
+| 2 | SIFT | MobileNetV2 pretrained ImageNet, di-fine-tune |
+| 3 | LBP | CNN kecil, dilatih dari nol |
+| 4 | LBP | MobileNetV2 pretrained ImageNet, di-fine-tune |
 
-Program tidak melakukan klasifikasi. Fitur disimpan ke `output/fitur.npz` dan divisualisasikan per kelas.
+Data dibagi 80/20 (191 latih, 48 uji) dengan proporsi kelas yang sama. Tiap model dilatih 20 epoch dengan Adam dan augmentasi flip horizontal.
 
 ## Dataset
 
@@ -64,7 +75,7 @@ Program memakai 5 kelas yang dinamai menurut motif: ceplok, kawung, megamendung,
 
    `--extra-index-url` memasang PyTorch versi CPU yang jauh lebih kecil. Saat pertama dijalankan, bobot MobileNetV2 (sekitar 14 MB) diunduh otomatis.
 
-3. Jalankan program:
+3. Jalankan program (sekitar 3–4 menit di CPU):
 
    ```bash
    python uts.py
@@ -81,32 +92,45 @@ Semua pengaturan ada di konstanta bagian atas `uts.py`.
 | `CLASSES` | 5 kelas motif | Daftar subfolder yang dipakai; `None` = semua kelas |
 | `SIZE` | 256 | Ukuran resize citra |
 | `FILTER` | `None` | `None`, `"median"`, atau `"gaussian"` |
-| `KSIZE` | 3 | Ukuran kernel filter |
-| `LBP_SCALES` | (8,1), (16,2), (24,3), (24,5) | Skala LBP |
-| `SIFT_STEP`, `SIFT_SIZES` | 8, (8, 16) | Jarak grid dan ukuran titik dense SIFT |
-| `VOCAB` | 256 | Jumlah visual word |
-| `KMEANS_SAMPLE` | 300 | Deskriptor acak per citra untuk k-means |
+| `LBP_SCALES` | (8,1), (16,2), (24,3) | Skala LBP, satu per kanal |
+| `SIFT_STEP`, `SIFT_SIZE` | 8, 4 | Jarak grid dan ukuran titik dense SIFT |
+| `DL_SIZE` | 128 | Ukuran peta fitur yang masuk ke model |
+| `TEST_SIZE` | 0.2 | Porsi data uji |
+| `EPOCHS`, `BATCH` | 20, 16 | Lama pelatihan dan ukuran batch |
+| `LR` | CNN 1e-3, MobileNetV2 1e-4 | Learning rate Adam |
+| `SEED` | 0 | Seed acak agar hasil bisa diulang |
 
 ## Hasil
 
-Program mencetak tabel ke terminal dan menyimpan hasil ke `output/`:
-
-| File | Isi |
-| --- | --- |
-| `A_<kelas>.png` | Input, grayscale, tiga enhancement beserta MSE/PSNR, dan histogram (satu contoh per kelas) |
-| `B_<kelas>.png` | Peta LBP, histogram LBP multi-skala, histogram visual word SIFT, dan fitur MobileNetV2 |
-| `mse_psnr.csv` | MSE dan PSNR tiap citra untuk tiap enhancement |
-| `fitur.npz` | Vektor fitur LBP, SIFT, dan MobileNetV2 semua citra, beserta label kelas |
-
-Rata-rata MSE dan PSNR (239 citra, tanpa filter):
+**Rata-rata MSE dan PSNR** (239 citra, tanpa filter):
 
 | Enhancement | Rata-rata MSE | Rata-rata PSNR (dB) |
 | --- | --- | --- |
 | HE | 1951.29 | 17.00 |
 | Contrast Stretching | 613.37 | 24.21* |
-| CLAHE | 561.38 | 21.90 |
+| **CLAHE** | **561.38** | 21.90 |
 
 \* 4 citra tidak berubah sama sekali (MSE = 0, PSNR tak hingga) dan dikeluarkan dari rata-rata PSNR.
+
+**Klasifikasi** (48 citra uji; tebakan acak = 0.20):
+
+| Output | Fitur + model | Akurasi | Macro F1 |
+| --- | --- | --- | --- |
+| 1 | SIFT + CNN | 0.583 | 0.584 |
+| 2 | SIFT + MobileNetV2 | **0.625** | **0.625** |
+| 3 | LBP + CNN | 0.479 | 0.434 |
+| 4 | LBP + MobileNetV2 | 0.562 | 0.561 |
+
+**File keluaran** di `output/`:
+
+| File | Isi |
+| --- | --- |
+| `A_<kelas>.png` | Input, grayscale, tiga enhancement beserta MSE/PSNR, dan histogram (satu contoh per kelas) |
+| `B_<kelas>.png` | Citra CLAHE, peta SIFT, peta LBP, dan tiap kanal LBP untuk contoh yang sama |
+| `mse_psnr.csv` | MSE dan PSNR tiap citra untuk tiap enhancement |
+| `fitur.npz` | Peta fitur SIFT dan LBP semua citra, label kelas, dan indeks data latih/uji |
+
+Terminal juga mencetak loss latih tiap 5 epoch, recall per kelas, dan confusion matrix untuk keempat output.
 
 ## Isi repo
 
@@ -114,6 +138,6 @@ Rata-rata MSE dan PSNR (239 citra, tanpa filter):
 | --- | --- |
 | `uts.py` | Program utama |
 | `requirements.txt` | Daftar pustaka |
-| `UTS COMVIS_14.pdf` | Laporan UTS |
-| `UTS_14.zip` | Berkas pengumpulan |
-| `output (median)/` | Hasil versi sebelumnya yang masih memakai median filter |
+| `UTS COMVIS_14.pdf` | Laporan UTS (versi sebelumnya) |
+| `UTS_14.zip` | Berkas pengumpulan (versi sebelumnya) |
+| `output (median)/` | Hasil versi lama yang masih memakai median filter |
